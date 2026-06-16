@@ -45,6 +45,11 @@ body {
   color: var(--muted);
 }
 
+.status-message {
+  min-height: 1.2em;
+  font-size: 0.9rem;
+}
+
 .toolbar {
   display: flex;
   justify-content: space-between;

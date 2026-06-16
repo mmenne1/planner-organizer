@@ -1,10 +1,46 @@
-const STORAGE_KEY = "plannerOrganizerData";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
+import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js";
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  getFirestore,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp
+} from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
 
-const state = loadState();
+const firebaseConfig = {
+  apiKey: "AIzaSyA2ULweu6J4N6R7tQAQK2ZcyXT0IZgZzKI",
+  authDomain: "festival-planner-c1bdc.firebaseapp.com",
+  projectId: "festival-planner-c1bdc",
+  storageBucket: "festival-planner-c1bdc.firebasestorage.app",
+  messagingSenderId: "944037433401",
+  appId: "1:944037433401:web:e419a10d93d8f6ca223de8",
+  measurementId: "G-0X03EJTBEP"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+
+const state = {
+  events: [],
+  currentEventId: null,
+  items: [],
+  purchases: []
+};
+
 let currentScreen = "events";
+let stopItemsListener = null;
+let stopPurchasesListener = null;
 
 const screenEvents = document.getElementById("screen-events");
 const screenTracker = document.getElementById("screen-tracker");
+const statusMessage = document.getElementById("status-message");
 const addEventForm = document.getElementById("add-event-form");
 const eventNameInput = document.getElementById("event-name");
 const eventSelect = document.getElementById("event-select");
@@ -21,7 +57,7 @@ const purchaseQtyInput = document.getElementById("purchase-qty");
 const overviewEl = document.getElementById("overview");
 const clearDataButton = document.getElementById("clear-data");
 
-addEventForm.addEventListener("submit", (event) => {
+addEventForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const name = eventNameInput.value.trim();
@@ -29,23 +65,24 @@ addEventForm.addEventListener("submit", (event) => {
     return;
   }
 
-  const createdEvent = {
-    id: crypto.randomUUID(),
-    name,
-    items: []
-  };
+  try {
+    const created = await addDoc(collection(db, "events"), {
+      name,
+      createdAt: serverTimestamp()
+    });
 
-  state.events.push(createdEvent);
-  state.currentEventId = createdEvent.id;
-  currentScreen = "tracker";
-
-  addEventForm.reset();
-  saveAndRender();
+    state.currentEventId = created.id;
+    currentScreen = "tracker";
+    addEventForm.reset();
+    selectCurrentEvent(state.currentEventId);
+  } catch {
+    setStatus("Could not create event. Check Firebase rules/auth.", true);
+  }
 });
 
 eventSelect.addEventListener("change", () => {
   state.currentEventId = eventSelect.value || null;
-  saveAndRender();
+  render();
 });
 
 openEventButton.addEventListener("click", () => {
@@ -54,6 +91,7 @@ openEventButton.addEventListener("click", () => {
   }
 
   currentScreen = "tracker";
+  selectCurrentEvent(state.currentEventId);
   render();
 });
 
@@ -62,7 +100,7 @@ switchEventButton.addEventListener("click", () => {
   render();
 });
 
-addItemForm.addEventListener("submit", (event) => {
+addItemForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const targetQty = Number(itemQtyInput.value);
@@ -73,18 +111,20 @@ addItemForm.addEventListener("submit", (event) => {
     return;
   }
 
-  activeEvent.items.push({
-    id: crypto.randomUUID(),
-    name,
-    targetQty,
-    purchases: []
-  });
+  try {
+    await addDoc(collection(db, "events", activeEvent.id, "items"), {
+      name,
+      targetQty,
+      createdAt: serverTimestamp()
+    });
 
-  addItemForm.reset();
-  saveAndRender();
+    addItemForm.reset();
+  } catch {
+    setStatus("Could not add item.", true);
+  }
 });
 
-addPurchaseForm.addEventListener("submit", (event) => {
+addPurchaseForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const itemId = purchaseItemSelect.value;
@@ -96,22 +136,21 @@ addPurchaseForm.addEventListener("submit", (event) => {
     return;
   }
 
-  const item = activeEvent.items.find((entry) => entry.id === itemId);
-  if (!item) {
-    return;
+  try {
+    await addDoc(collection(db, "events", activeEvent.id, "purchases"), {
+      itemId,
+      buyer,
+      qty,
+      createdAt: serverTimestamp()
+    });
+
+    addPurchaseForm.reset();
+  } catch {
+    setStatus("Could not save purchase.", true);
   }
-
-  item.purchases.push({
-    id: crypto.randomUUID(),
-    buyer,
-    qty
-  });
-
-  addPurchaseForm.reset();
-  saveAndRender();
 });
 
-clearDataButton.addEventListener("click", () => {
+clearDataButton.addEventListener("click", async () => {
   const activeEvent = getCurrentEvent();
   if (!activeEvent) {
     return;
@@ -121,74 +160,109 @@ clearDataButton.addEventListener("click", () => {
     return;
   }
 
-  activeEvent.items = [];
-  saveAndRender();
+  try {
+    const itemsSnapshot = await getDocs(collection(db, "events", activeEvent.id, "items"));
+    const purchasesSnapshot = await getDocs(collection(db, "events", activeEvent.id, "purchases"));
+
+    const deletions = [];
+    itemsSnapshot.forEach((item) => {
+      deletions.push(deleteDoc(doc(db, "events", activeEvent.id, "items", item.id)));
+    });
+    purchasesSnapshot.forEach((purchase) => {
+      deletions.push(deleteDoc(doc(db, "events", activeEvent.id, "purchases", purchase.id)));
+    });
+
+    await Promise.all(deletions);
+  } catch {
+    setStatus("Could not clear active event.", true);
+  }
 });
 
-function loadState() {
-  const initial = { events: [], currentEventId: null };
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    setStatus("Connected.");
+    initEventsListener();
+    return;
+  }
 
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return initial;
-    }
-
-    const parsed = JSON.parse(raw);
-    if (!parsed) {
-      return initial;
-    }
-
-    if (Array.isArray(parsed.events)) {
-      const events = parsed.events.map((event) => ({
-        id: event.id,
-        name: event.name,
-        items: normalizeItems(event.items)
-      }));
-
-      const currentEventId = typeof parsed.currentEventId === "string"
-        ? parsed.currentEventId
-        : events[0]?.id || null;
-
-      return { events, currentEventId };
-    }
-
-    if (Array.isArray(parsed.items)) {
-      const migratedEvent = {
-        id: crypto.randomUUID(),
-        name: "My event",
-        items: normalizeItems(parsed.items)
-      };
-
-      return {
-        events: [migratedEvent],
-        currentEventId: migratedEvent.id
-      };
-    }
-
-    return initial;
+    await signInAnonymously(auth);
+    setStatus("Connected.");
   } catch {
-    return initial;
+    setStatus("Firebase sign-in failed. Enable Anonymous auth and check rules.", true);
   }
+});
+
+function initEventsListener() {
+  const eventsQuery = query(collection(db, "events"), orderBy("createdAt", "asc"));
+  onSnapshot(eventsQuery, (snapshot) => {
+    state.events = snapshot.docs.map((eventDoc) => ({
+      id: eventDoc.id,
+      ...eventDoc.data()
+    }));
+
+    if (!state.events.some((event) => event.id === state.currentEventId)) {
+      state.currentEventId = state.events[0]?.id || null;
+      if (!state.currentEventId) {
+        currentScreen = "events";
+      }
+    }
+
+    if (currentScreen === "tracker" && state.currentEventId) {
+      selectCurrentEvent(state.currentEventId);
+    }
+
+    render();
+  }, () => {
+    setStatus("Could not read events. Check Firestore rules.", true);
+  });
 }
 
-function normalizeItems(items) {
-  if (!Array.isArray(items)) {
-    return [];
+function selectCurrentEvent(eventId) {
+  if (!eventId) {
+    cleanupActiveEventListeners();
+    state.items = [];
+    state.purchases = [];
+    render();
+    return;
   }
 
-  return items.map((item) => ({
-        id: item.id,
-        name: item.name,
-        targetQty: Number(item.targetQty) || 0,
-        purchases: Array.isArray(item.purchases)
-          ? item.purchases.map((purchase) => ({
-              id: purchase.id,
-              buyer: purchase.buyer,
-              qty: Number(purchase.qty) || 0
-            }))
-          : []
-      }));
+  cleanupActiveEventListeners();
+
+  const itemsQuery = query(collection(db, "events", eventId, "items"), orderBy("createdAt", "asc"));
+  const purchasesQuery = query(collection(db, "events", eventId, "purchases"), orderBy("createdAt", "asc"));
+
+  stopItemsListener = onSnapshot(itemsQuery, (snapshot) => {
+    state.items = snapshot.docs.map((itemDoc) => ({
+      id: itemDoc.id,
+      ...itemDoc.data()
+    }));
+    render();
+  }, () => {
+    setStatus("Could not read items.", true);
+  });
+
+  stopPurchasesListener = onSnapshot(purchasesQuery, (snapshot) => {
+    state.purchases = snapshot.docs.map((purchaseDoc) => ({
+      id: purchaseDoc.id,
+      ...purchaseDoc.data()
+    }));
+    render();
+  }, () => {
+    setStatus("Could not read purchases.", true);
+  });
+}
+
+function cleanupActiveEventListeners() {
+  if (stopItemsListener) {
+    stopItemsListener();
+    stopItemsListener = null;
+  }
+
+  if (stopPurchasesListener) {
+    stopPurchasesListener();
+    stopPurchasesListener = null;
+  }
 }
 
 function getCurrentEvent() {
@@ -197,11 +271,6 @@ function getCurrentEvent() {
   }
 
   return state.events.find((event) => event.id === state.currentEventId) || null;
-}
-
-function saveAndRender() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  render();
 }
 
 function render() {
@@ -242,7 +311,7 @@ function renderTrackerHeader() {
 
 function renderItemSelect() {
   const activeEvent = getCurrentEvent();
-  const items = activeEvent?.items || [];
+  const items = activeEvent ? state.items : [];
 
   purchaseItemSelect.innerHTML = "<option value=\"\">Select an item</option>";
 
@@ -267,21 +336,24 @@ function renderOverview() {
     return;
   }
 
-  if (activeEvent.items.length === 0) {
+  if (state.items.length === 0) {
     overviewEl.innerHTML = "<p class=\"empty\">No items yet. Add what needs to be bought.</p>";
     return;
   }
 
   overviewEl.innerHTML = "";
 
-  for (const item of activeEvent.items) {
-    const bought = item.purchases.reduce((sum, purchase) => sum + purchase.qty, 0);
-    const remaining = Math.max(0, item.targetQty - bought);
-    const progress = item.targetQty > 0 ? Math.min(100, Math.round((bought / item.targetQty) * 100)) : 0;
+  for (const item of state.items) {
+    const purchasesForItem = state.purchases.filter((purchase) => purchase.itemId === item.id);
+    const bought = purchasesForItem.reduce((sum, purchase) => sum + (Number(purchase.qty) || 0), 0);
+    const remaining = Math.max(0, (Number(item.targetQty) || 0) - bought);
+    const progress = (Number(item.targetQty) || 0) > 0
+      ? Math.min(100, Math.round((bought / Number(item.targetQty)) * 100))
+      : 0;
 
-    const byBuyer = item.purchases.reduce((acc, purchase) => {
+    const byBuyer = purchasesForItem.reduce((acc, purchase) => {
       const key = purchase.buyer;
-      acc[key] = (acc[key] || 0) + purchase.qty;
+      acc[key] = (acc[key] || 0) + (Number(purchase.qty) || 0);
       return acc;
     }, {});
 
@@ -295,16 +367,21 @@ function renderOverview() {
     card.className = "item-card";
     card.innerHTML = `
       <div class="item-top">
-        <h3 class="item-name">${escapeHtml(item.name)}</h3>
+        <h3 class="item-name">${escapeHtml(item.name || "")}</h3>
         <span class="badge">${remaining} left</span>
       </div>
-      <p class="meta">Need: ${item.targetQty} • Bought: ${bought}</p>
+      <p class="meta">Need: ${Number(item.targetQty) || 0} • Bought: ${bought}</p>
       <div class="progress"><span style="width:${progress}%"></span></div>
       <p class="buyers">${escapeHtml(buyerText)}</p>
     `;
 
     overviewEl.append(card);
   }
+}
+
+function setStatus(message, isError = false) {
+  statusMessage.textContent = message;
+  statusMessage.style.color = isError ? "#dc2626" : "#6b7280";
 }
 
 function escapeHtml(value) {
