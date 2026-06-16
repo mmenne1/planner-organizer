@@ -130,6 +130,25 @@ button.ghost {
   margin-bottom: 8px;
 }
 
+.overview-controls {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.compact-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95rem;
+}
+
+.compact-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
 .overview {
   display: grid;
   gap: 10px;
@@ -223,5 +242,10 @@ button.ghost {
   .form-grid button {
     grid-column: 1 / -1;
     max-width: 220px;
+  }
+
+  .overview-controls {
+    grid-template-columns: 1fr 1fr;
+    align-items: end;
   }
 }

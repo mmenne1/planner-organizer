@@ -55,6 +55,8 @@ const buyerNameInput = document.getElementById("buyer-name");
 const purchaseItemSelect = document.getElementById("purchase-item");
 const purchaseQtyInput = document.getElementById("purchase-qty");
 const overviewEl = document.getElementById("overview");
+const hideCompleteInput = document.getElementById("hide-complete");
+const overviewSearchInput = document.getElementById("overview-search");
 const clearDataButton = document.getElementById("clear-data");
 
 overviewEl.addEventListener("click", async (event) => {
@@ -87,6 +89,14 @@ overviewEl.addEventListener("click", async (event) => {
   } catch {
     setStatus("Could not delete item.", true);
   }
+});
+
+hideCompleteInput.addEventListener("change", () => {
+  renderOverview();
+});
+
+overviewSearchInput.addEventListener("input", () => {
+  renderOverview();
 });
 
 addEventForm.addEventListener("submit", async (event) => {
@@ -374,6 +384,9 @@ function renderOverview() {
   }
 
   overviewEl.innerHTML = "";
+  const hideCompleted = hideCompleteInput.checked;
+  const searchText = overviewSearchInput.value.trim().toLowerCase();
+  let shownItems = 0;
 
   for (const item of state.items) {
     const purchasesForItem = state.purchases.filter((purchase) => purchase.itemId === item.id);
@@ -395,6 +408,15 @@ function renderOverview() {
           .join(" • ")
       : "No purchases yet";
 
+    if (hideCompleted && remaining === 0) {
+      continue;
+    }
+
+    const searchHaystack = `${item.name || ""} ${buyerText}`.toLowerCase();
+    if (searchText && !searchHaystack.includes(searchText)) {
+      continue;
+    }
+
     const card = document.createElement("article");
     card.className = "item-card";
     card.innerHTML = `
@@ -411,6 +433,11 @@ function renderOverview() {
     `;
 
     overviewEl.append(card);
+    shownItems += 1;
+  }
+
+  if (shownItems === 0) {
+    overviewEl.innerHTML = "<p class=\"empty\">No items match the current filter/search.</p>";
   }
 }
 
