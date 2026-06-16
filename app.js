@@ -57,6 +57,38 @@ const purchaseQtyInput = document.getElementById("purchase-qty");
 const overviewEl = document.getElementById("overview");
 const clearDataButton = document.getElementById("clear-data");
 
+overviewEl.addEventListener("click", async (event) => {
+  const deleteButton = event.target.closest(".delete-item");
+  if (!deleteButton) {
+    return;
+  }
+
+  const itemId = deleteButton.dataset.itemId;
+  const activeEvent = getCurrentEvent();
+  if (!itemId || !activeEvent) {
+    return;
+  }
+
+  const item = state.items.find((entry) => entry.id === itemId);
+  const itemName = item?.name || "this item";
+
+  if (!confirm(`Delete \"${itemName}\" including all related purchases?`)) {
+    return;
+  }
+
+  try {
+    const relatedPurchases = state.purchases.filter((purchase) => purchase.itemId === itemId);
+    const deletions = relatedPurchases.map((purchase) =>
+      deleteDoc(doc(db, "events", activeEvent.id, "purchases", purchase.id))
+    );
+
+    deletions.push(deleteDoc(doc(db, "events", activeEvent.id, "items", itemId)));
+    await Promise.all(deletions);
+  } catch {
+    setStatus("Could not delete item.", true);
+  }
+});
+
 addEventForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -368,7 +400,10 @@ function renderOverview() {
     card.innerHTML = `
       <div class="item-top">
         <h3 class="item-name">${escapeHtml(item.name || "")}</h3>
-        <span class="badge">${remaining} left</span>
+        <div class="item-actions">
+          <span class="badge">${remaining} left</span>
+          <button type="button" class="delete-item" data-item-id="${item.id}">Delete</button>
+        </div>
       </div>
       <p class="meta">Need: ${Number(item.targetQty) || 0} • Bought: ${bought}</p>
       <div class="progress"><span style="width:${progress}%"></span></div>

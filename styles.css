@@ -155,6 +155,12 @@ button.ghost {
   align-items: center;
 }
 
+.item-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .item-name {
   margin: 0;
   font-size: 1rem;
@@ -167,6 +173,17 @@ button.ghost {
   padding: 3px 8px;
   border-radius: 999px;
   white-space: nowrap;
+}
+
+.delete-item {
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid var(--danger);
+  background: transparent;
+  color: var(--danger);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
 }
 
 .progress {
