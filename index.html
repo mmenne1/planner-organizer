@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Event Buy Tracker</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+    <section id="screen-events" class="screen">
+      <header class="app-header">
+        <h1>Event Buy Tracker</h1>
+        <p>Choose an event first, then track purchases.</p>
+      </header>
+
+      <section class="card">
+        <h2>Create event</h2>
+        <form id="add-event-form" class="form-grid">
+          <label>
+            Event name
+            <input id="event-name" type="text" placeholder="festival 2026" required />
+          </label>
+
+          <button type="submit">Create event</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Choose existing event</h2>
+        <label class="event-picker">
+          Event
+          <select id="event-select" required>
+            <option value="">Select an event</option>
+          </select>
+        </label>
+        <button id="open-event" type="button" class="primary-action">Open event</button>
+      </section>
+    </section>
+
+    <section id="screen-tracker" class="screen hidden">
+      <header class="app-header">
+        <div class="toolbar">
+          <h1 id="current-event-name">Event</h1>
+          <button id="switch-event" type="button" class="ghost">Change event</button>
+        </div>
+        <p>Track what still needs to be bought.</p>
+      </header>
+
+      <section class="card">
+        <h2>Add needed item</h2>
+        <form id="add-item-form" class="form-grid">
+          <label>
+            Quantity needed
+            <input id="item-qty" type="number" min="1" step="1" placeholder="12" required />
+          </label>
+
+          <label>
+            Item name
+            <input id="item-name" type="text" placeholder="Item name here" required />
+          </label>
+
+          <button type="submit">Add item</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Record purchase</h2>
+        <form id="add-purchase-form" class="form-grid">
+          <label>
+            Buyer
+            <input id="buyer-name" type="text" placeholder="Name here" required />
+          </label>
+
+          <label>
+            Item
+            <select id="purchase-item" required>
+              <option value="">Select an item</option>
+            </select>
+          </label>
+
+          <label>
+            Quantity bought
+            <input id="purchase-qty" type="number" min="1" step="1" placeholder="4" required />
+          </label>
+
+          <button type="submit">Save purchase</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="overview-head">
+          <h2>Overview</h2>
+          <button id="clear-data" class="ghost" type="button">Clear active event</button>
+        </div>
+        <div id="overview" class="overview"></div>
+      </section>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
