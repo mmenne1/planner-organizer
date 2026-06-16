@@ -26,6 +26,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
+const PREFERRED_BUYER_KEY = "plannerPreferredBuyer";
 
 const state = {
   events: [],
@@ -43,8 +44,10 @@ const screenTracker = document.getElementById("screen-tracker");
 const statusMessage = document.getElementById("status-message");
 const addEventForm = document.getElementById("add-event-form");
 const eventNameInput = document.getElementById("event-name");
+const createEventButton = addEventForm.querySelector("button[type='submit']");
 const eventSelect = document.getElementById("event-select");
 const openEventButton = document.getElementById("open-event");
+const deleteEventButton = document.getElementById("delete-event");
 const switchEventButton = document.getElementById("switch-event");
 const currentEventNameEl = document.getElementById("current-event-name");
 const addItemForm = document.getElementById("add-item-form");
@@ -61,13 +64,55 @@ const clearDataButton = document.getElementById("clear-data");
 
 overviewEl.addEventListener("click", async (event) => {
   const deleteButton = event.target.closest(".delete-item");
-  if (!deleteButton) {
+  const quickAddButton = event.target.closest(".quick-add");
+
+  if (!deleteButton && !quickAddButton) {
+    return;
+  }
+
+  const activeEvent = getCurrentEvent();
+  if (!activeEvent) {
+    return;
+  }
+
+  if (quickAddButton) {
+    const itemId = quickAddButton.dataset.itemId;
+    const item = state.items.find((entry) => entry.id === itemId);
+    if (!item) {
+      return;
+    }
+
+    const qtyInput = prompt(`How many ${item.name || "items"} did you buy?`);
+    if (qtyInput === null) {
+      return;
+    }
+
+    const qty = Number(qtyInput);
+    if (!Number.isInteger(qty) || qty <= 0) {
+      setStatus("Please enter a valid positive quantity.", true);
+      return;
+    }
+
+    const currentBuyer = buyerNameInput.value.trim() || loadPreferredBuyer();
+    const buyer = currentBuyer || prompt("Enter buyer name:");
+    if (!buyer || !buyer.trim()) {
+      setStatus("Buyer name is required.", true);
+      return;
+    }
+
+    const normalizedBuyer = buyer.trim();
+    const saved = await savePurchase(activeEvent.id, itemId, normalizedBuyer, qty);
+    if (saved) {
+      buyerNameInput.value = normalizedBuyer;
+      savePreferredBuyer(normalizedBuyer);
+      setStatus("Purchase added.");
+    }
+
     return;
   }
 
   const itemId = deleteButton.dataset.itemId;
-  const activeEvent = getCurrentEvent();
-  if (!itemId || !activeEvent) {
+  if (!itemId) {
     return;
   }
 
@@ -99,6 +144,17 @@ overviewSearchInput.addEventListener("input", () => {
   renderOverview();
 });
 
+eventNameInput.addEventListener("input", () => {
+  renderCreateEventButtonState();
+});
+
+buyerNameInput.addEventListener("input", () => {
+  const buyer = buyerNameInput.value.trim();
+  if (buyer) {
+    savePreferredBuyer(buyer);
+  }
+});
+
 addEventForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -116,6 +172,7 @@ addEventForm.addEventListener("submit", async (event) => {
     state.currentEventId = created.id;
     currentScreen = "tracker";
     addEventForm.reset();
+    renderCreateEventButtonState();
     selectCurrentEvent(state.currentEventId);
   } catch {
     setStatus("Could not create event. Check Firebase rules/auth.", true);
@@ -135,6 +192,48 @@ openEventButton.addEventListener("click", () => {
   currentScreen = "tracker";
   selectCurrentEvent(state.currentEventId);
   render();
+});
+
+deleteEventButton.addEventListener("click", async () => {
+  const activeEvent = getCurrentEvent();
+  if (!activeEvent) {
+    return;
+  }
+
+  const typedName = prompt(`To delete this event, type its name exactly:\n${activeEvent.name}`);
+  if (typedName === null) {
+    return;
+  }
+
+  if (typedName !== activeEvent.name) {
+    setStatus("Event name did not match. Deletion canceled.", true);
+    return;
+  }
+
+  try {
+    const itemsSnapshot = await getDocs(collection(db, "events", activeEvent.id, "items"));
+    const purchasesSnapshot = await getDocs(collection(db, "events", activeEvent.id, "purchases"));
+
+    const deletions = [];
+    itemsSnapshot.forEach((item) => {
+      deletions.push(deleteDoc(doc(db, "events", activeEvent.id, "items", item.id)));
+    });
+    purchasesSnapshot.forEach((purchase) => {
+      deletions.push(deleteDoc(doc(db, "events", activeEvent.id, "purchases", purchase.id)));
+    });
+
+    deletions.push(deleteDoc(doc(db, "events", activeEvent.id)));
+    await Promise.all(deletions);
+
+    state.currentEventId = null;
+    currentScreen = "events";
+    cleanupActiveEventListeners();
+    state.items = [];
+    state.purchases = [];
+    render();
+  } catch {
+    setStatus("Could not delete event.", true);
+  }
 });
 
 switchEventButton.addEventListener("click", () => {
@@ -178,17 +277,10 @@ addPurchaseForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  try {
-    await addDoc(collection(db, "events", activeEvent.id, "purchases"), {
-      itemId,
-      buyer,
-      qty,
-      createdAt: serverTimestamp()
-    });
-
-    addPurchaseForm.reset();
-  } catch {
-    setStatus("Could not save purchase.", true);
+  const saved = await savePurchase(activeEvent.id, itemId, buyer, qty);
+  if (saved) {
+    savePreferredBuyer(buyer);
+    purchaseQtyInput.value = "";
   }
 });
 
@@ -317,10 +409,39 @@ function getCurrentEvent() {
 
 function render() {
   renderActiveScreen();
+  renderCreateEventButtonState();
   renderEventSelect();
   renderTrackerHeader();
   renderItemSelect();
   renderOverview();
+}
+
+async function savePurchase(eventId, itemId, buyer, qty) {
+  try {
+    await addDoc(collection(db, "events", eventId, "purchases"), {
+      itemId,
+      buyer,
+      qty,
+      createdAt: serverTimestamp()
+    });
+
+    return true;
+  } catch {
+    setStatus("Could not save purchase.", true);
+    return false;
+  }
+}
+
+function savePreferredBuyer(name) {
+  localStorage.setItem(PREFERRED_BUYER_KEY, name);
+}
+
+function loadPreferredBuyer() {
+  return localStorage.getItem(PREFERRED_BUYER_KEY) || "";
+}
+
+function renderCreateEventButtonState() {
+  createEventButton.disabled = eventNameInput.value.trim().length === 0;
 }
 
 function renderActiveScreen() {
@@ -344,6 +465,7 @@ function renderEventSelect() {
   }
 
   openEventButton.disabled = !state.currentEventId;
+  deleteEventButton.disabled = !state.currentEventId;
 }
 
 function renderTrackerHeader() {
@@ -424,6 +546,7 @@ function renderOverview() {
         <h3 class="item-name">${escapeHtml(item.name || "")}</h3>
         <div class="item-actions">
           <span class="badge">${remaining} left</span>
+          <button type="button" class="quick-add" data-item-id="${item.id}">Add</button>
           <button type="button" class="delete-item" data-item-id="${item.id}">Delete</button>
         </div>
       </div>
@@ -456,3 +579,8 @@ function escapeHtml(value) {
 }
 
 render();
+
+const initialBuyer = loadPreferredBuyer();
+if (initialBuyer) {
+  buyerNameInput.value = initialBuyer;
+}
